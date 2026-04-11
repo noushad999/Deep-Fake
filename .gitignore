@@ -41,26 +41,31 @@ ENV/
 .coverage
 htmlcov/
 
-# Logs
+# Data (large datasets - don't track)
+data_faces/
+data_ffpp_kaggle/
+data_ffpp_partial/
+data_micro/
+data_quality/
+data_stylegan_partial/
+data_subset/
+data_tiny/
+
+# Logs (evaluation results - regenerate locally)
+logs/evaluation/
+logs/evaluation_v2/
 logs/*.png
 logs/*.jpg
 logs/*.json
-logs/evaluation/*.png
-logs/evaluation/*.json
-logs/evaluation_v2/*.png
-logs/evaluation_v2/*.json
-!logs/.gitkeep
+scripts/logs/
 
-# Checkpoints (large files)
+# Checkpoints (large files - use Git LFS if needed)
 scripts/checkpoints/*.pth
 scripts/checkpoints/*.pt
-scripts/checkpoints/*.ckpt
-!scripts/checkpoints/.gitkeep
-
-# Models
+checkpoints/*.pth
+checkpoints/*.pt
 models/*.pth
 models/*.pt
-!models/.gitkeep
 
 # Data (large datasets)
 data/*/
@@ -111,3 +116,36 @@ scripts/logs/tensorboard/
 
 # Kaggle
 kaggle.json
+
+# Qwen Code (AI assistant config)
+.qwen/
+
+# Large model checkpoints (use Git LFS if needed)
+*.bin
+*.onnx
+
+# OS specific
+.DS_Store
+*.log
+
+# Local development (not for repo)
+DOWNLOAD_GUIDE.md
+PROGRESS_REPORT_PRESENTATION.md
+
+# Utility scripts (not needed for production)
+scripts/check_*.py
+scripts/quick_*.py
+scripts/read_pdf.py
+scripts/test_streaming.py
+scripts/try_hf_datasets.py
+scripts/verify_dimensions.py
+scripts/download_hf_datasets.py
+scripts/download_kaggle_datasets.py
+scripts/download_public_datasets.py
+scripts/download_real_*.py
+scripts/download_small_face.py
+scripts/stream_ffpp.py
+scripts/create_*.py
+scripts/extract_partial.py
+scripts/fix_micro.py
+scripts/generate_face_data.py
