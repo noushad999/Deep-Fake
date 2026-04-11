@@ -84,7 +84,7 @@ deepfake-detection/
 
 ```bash
 # Clone the repository
-git clone https://github.com/noushad25/thesis-group-3.git
+git clone https://github.com/noushad999/thesis-group-3.git
 cd thesis-group-3
 
 # Create virtual environment (optional)
