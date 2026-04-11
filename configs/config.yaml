@@ -1,0 +1,110 @@
+# ============================================================
+# Configuration for Multi-Stream Deepfake Detection
+# ============================================================
+
+# --- Paths ---
+data:
+  root_dir: "E:/deepfake-detection/data_quality"
+
+# --- Model Architecture ---
+model:
+  # Stream 1: Spatial Domain (NPR Branch)
+  spatial:
+    backbone: "efficientnet_b0"
+    feature_dim: 128
+    pretrained: true
+  
+  # Stream 2: Frequency Domain (FreqBlender)
+  frequency:
+    backbone: "resnet18"
+    feature_dim: 64
+    fft_learnable: true
+    pretrained: true
+  
+  # Stream 3: Semantic Domain (FAT-Lite Transformer)
+  semantic:
+    backbone: "vit_tiny_patch16_224"
+    feature_dim: 384
+    num_heads: 6
+    depth: 8
+    pretrained: true
+  
+  # Fusion
+  fusion:
+    combined_dim: 576  # 128 + 64 + 384
+    hidden_dim: 256
+    attention_heads: 4
+  
+  # Total parameters target: ~24-25M
+  # Total model size target: ~95 MB
+
+# --- Training ---
+training:
+  batch_size: 32
+  num_workers: 0
+  epochs: 15
+  lr: 0.0001
+  weight_decay: 0.0001
+  scheduler: "cosine"
+  warmup_epochs: 2
+  patience: 4  # Early stopping
+  gradient_accumulation: 1
+  max_grad_norm: 1.0
+  augmentation_level: "light"
+  
+  # Loss
+  loss:
+    type: "binary_cross_entropy"
+    label_smoothing: 0.1
+  
+  # Augmentation
+  augmentation:
+    resize: 256
+    crop: 224
+    horizontal_flip: true
+    color_jitter: true
+    random_rotation: 10
+
+# --- Evaluation ---
+evaluation:
+  metrics:
+    - "accuracy"
+    - "auc"
+    - "f1_score"
+    - "precision"
+    - "recall"
+  
+  # GradCAM++
+  gradcam:
+    enabled: true
+    output_dir: "./logs/heatmaps"
+    target_layer: "fusion"
+
+# --- Datasets (Phase 1: Start Small) ---
+datasets:
+  phase1:
+    fake: "cifake"
+    real: "coco_subset"
+    estimated_size_gb: 15
+  
+  phase2:
+    fake:
+      - "forensynths"
+      - "stable_diffusion"
+    real:
+      - "imagenet"
+      - "coco"
+    estimated_size_gb: 200
+
+# --- Logging ---
+logging:
+  log_dir: "./logs"
+  checkpoint_dir: "./checkpoints"
+  wandb:
+    enabled: true
+    project: "deepfake-detection"
+    entity: ""  # Your wandb username
+
+# --- Reproducibility ---
+seed: 42
+deterministic: true
