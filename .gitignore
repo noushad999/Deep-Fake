@@ -117,8 +117,23 @@ scripts/logs/tensorboard/
 # Kaggle
 kaggle.json
 
-# Qwen Code (AI assistant config)
+# AI assistant configs (not for repo)
 .qwen/
+.claude/
+
+# AI-generated presentation/speech content
+PRESENTATION_SPEECH.md
+
+# Logs — figures and generated outputs
+logs/tensorboard/
+logs/heatmaps/
+logs/final_eval_gradcam/
+logs/cross_generator/
+logs/evaluation/
+logs/evaluation_v2/
+logs/*.png
+logs/*.jpg
+logs/*.json
 
 # Large model checkpoints (use Git LFS if needed)
 *.bin

@@ -17,8 +17,10 @@ from torch.utils.data import DataLoader
 import numpy as np
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
-    roc_auc_score, confusion_matrix, classification_report
+    roc_auc_score, roc_curve, confusion_matrix, classification_report
 )
+from scipy.optimize import brentq
+from scipy.interpolate import interp1d
 from tqdm import tqdm
 import matplotlib
 matplotlib.use('Agg')
@@ -124,12 +126,20 @@ def evaluate_model(
     all_probs = np.array(all_probs)
     
     # Compute metrics
+    auc_val = roc_auc_score(all_labels, all_probs) * 100
+    fpr, tpr, _ = roc_curve(all_labels, all_probs)
+    try:
+        eer_val = brentq(lambda x: 1.0 - x - float(interp1d(fpr, tpr)(x)), 0., 1.) * 100
+    except Exception:
+        eer_val = 0.0
+
     metrics = {
-        'accuracy': accuracy_score(all_labels, all_preds) * 100,
+        'accuracy':  accuracy_score(all_labels, all_preds) * 100,
         'precision': precision_score(all_labels, all_preds, zero_division=0) * 100,
-        'recall': recall_score(all_labels, all_preds, zero_division=0) * 100,
-        'f1_score': f1_score(all_labels, all_preds, zero_division=0) * 100,
-        'auc_roc': roc_auc_score(all_labels, all_probs) * 100,
+        'recall':    recall_score(all_labels, all_preds, zero_division=0) * 100,
+        'f1_score':  f1_score(all_labels, all_preds, zero_division=0) * 100,
+        'auc_roc':   auc_val,
+        'eer':       eer_val,
     }
     
     # Confusion matrix

@@ -1,110 +1,101 @@
 # ============================================================
-# Configuration for Multi-Stream Deepfake Detection
+# Multi-Stream Deepfake Detection — Master Config
 # ============================================================
 
 # --- Paths ---
 data:
-  root_dir: "E:/deepfake-detection/data_quality"
+  root_dir: "${DATA_ROOT:-data}"   # override with DATA_ROOT env var; defaults to ./data
 
 # --- Model Architecture ---
 model:
-  # Stream 1: Spatial Domain (NPR Branch)
+  # Stream 1: Spatial Domain (NPR Branch — EfficientNet-B0)
   spatial:
-    backbone: "efficientnet_b0"
+    backbone:    "efficientnet_b0"
     feature_dim: 128
-    pretrained: true
-  
-  # Stream 2: Frequency Domain (FreqBlender)
+    pretrained:  true
+
+  # Stream 2: Frequency Domain (FreqBlender — LearnableFFT + ResNet-18)
   frequency:
-    backbone: "resnet18"
-    feature_dim: 64
-    fft_learnable: true
-    pretrained: true
-  
-  # Stream 3: Semantic Domain (FAT-Lite Transformer)
+    backbone:        "resnet18"
+    feature_dim:     64
+    fft_learnable:   true
+    pretrained:      true
+
+  # Stream 3: Semantic Domain (FAT-Lite — ViT-Tiny @ 256px)
   semantic:
-    backbone: "vit_tiny_patch16_224"
+    backbone:    "vit_tiny_patch16_224"
     feature_dim: 384
-    num_heads: 6
-    depth: 8
-    pretrained: true
-  
-  # Fusion
+    pretrained:  true
+
+  # Fusion: Cross-Stream Multi-Head Attention
   fusion:
-    combined_dim: 576  # 128 + 64 + 384
-    hidden_dim: 256
-    attention_heads: 4
-  
-  # Total parameters target: ~24-25M
-  # Total model size target: ~95 MB
+    hidden_dim:       256   # all streams projected here before attention
+    attention_heads:  4
 
 # --- Training ---
 training:
-  batch_size: 32
-  num_workers: 0
-  epochs: 15
-  lr: 0.0001
-  weight_decay: 0.0001
-  scheduler: "cosine"
-  warmup_epochs: 2
-  patience: 4  # Early stopping
+  batch_size:           128   # GPU: RTX 5060 Ti 16GB can handle 128 easily
+  num_workers:          0     # 0 = main process loading; WSL2 fork() is slow with workers
+  epochs:               50
+  lr:                   3e-4  # scale lr with batch size (linear scaling rule: 1e-4 * 128/32)
+  weight_decay:         1e-4
+  warmup_epochs:        3
+  patience:             8    # early stopping patience (now on AUC)
   gradient_accumulation: 1
-  max_grad_norm: 1.0
-  augmentation_level: "light"
-  
-  # Loss
+  max_grad_norm:        1.0
+  augmentation_level:  "medium"   # none | light | medium | heavy
+
   loss:
-    type: "binary_cross_entropy"
-    label_smoothing: 0.1
-  
-  # Augmentation
-  augmentation:
-    resize: 256
-    crop: 224
-    horizontal_flip: true
-    color_jitter: true
-    random_rotation: 10
+    type: "weighted_bce"   # weighted_bce handles real/fake class imbalance
+    pos_weight: 2.72       # ≈ n_real/n_fake (15k/5.5k face-filtered dataset)
+
+# --- Datasets (informational) ---
+datasets:
+  real:
+    - name:  "MS-COCO 2017 val"
+      path:  "data/real/coco"
+      size:  "~1 GB"
+    - name:  "FFHQ 256px"
+      path:  "data/real/ffhq"
+      size:  "~2 GB"
+
+  fake:
+    - name:  "DiffusionDB (SD v1.x)"
+      path:  "data/fake/diffusiondb"
+      size:  "~2 GB subset"
+    - name:  "GenImage (SD-XL / Midjourney v5 / DALL-E 3 / GLIDE / ADM / …)"
+      path:  "data/fake/genimage/"
+      size:  "~16 GB for 2K/gen"
+    - name:  "ForenSynths (ProGAN / StyleGAN / BigGAN)"
+      path:  "data/fake/forensynths"
+      note:  "manual download required — see scripts/download_datasets.py"
 
 # --- Evaluation ---
 evaluation:
+  batch_size:   16
   metrics:
-    - "accuracy"
-    - "auc"
-    - "f1_score"
-    - "precision"
-    - "recall"
-  
-  # GradCAM++
-  gradcam:
-    enabled: true
-    output_dir: "./logs/heatmaps"
-    target_layer: "fusion"
+    - accuracy
+    - auc
+    - eer
+    - f1_score
+    - precision
+    - recall
 
-# --- Datasets (Phase 1: Start Small) ---
-datasets:
-  phase1:
-    fake: "cifake"
-    real: "coco_subset"
-    estimated_size_gb: 15
-  
-  phase2:
-    fake:
-      - "forensynths"
-      - "stable_diffusion"
-    real:
-      - "imagenet"
-      - "coco"
-    estimated_size_gb: 200
+  gradcam:
+    enabled:      true
+    num_samples:  20
+    output_dir:   "./logs/heatmaps"
 
 # --- Logging ---
 logging:
-  log_dir: "./logs"
+  log_dir:        "./logs"
   checkpoint_dir: "./checkpoints"
+
   wandb:
-    enabled: true
+    enabled: false          # set to true if you have wandb set up
     project: "deepfake-detection"
-    entity: ""  # Your wandb username
+    entity:  ""             # your wandb username
 
 # --- Reproducibility ---
-seed: 42
+seed:          42
 deterministic: true

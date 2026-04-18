@@ -1,89 +1,116 @@
 """
 Multi-Level Adaptive Fusion (MLAF) Module
-Attention-weighted fusion of spatial (128), frequency (64), and semantic (384) streams.
+Cross-stream attention fusion of spatial (128), frequency (64), and semantic (384) streams.
+Each stream is treated as a separate token — proper multi-head cross-attention.
 Output: Binary classification logit (Real/Fake)
 """
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple, Dict
+from typing import Tuple, Optional
 
 
 class StreamAttention(nn.Module):
     """
-    Cross-stream attention weighting mechanism.
-    Learns to weight each stream's contribution adaptively.
+    Cross-stream attention: each stream feature is projected to a common
+    hidden_dim and treated as one token in a 3-token sequence.
+    Streams attend to each other, learning which stream matters most
+    for a given input.
+
+    Bug fixed: original code used seq_len=1 (self-attention on a single token),
+    which is mathematically a no-op. This version uses 3 tokens — one per stream.
     """
-    
-    def __init__(self, total_dim: int = 576, n_heads: int = 4):
+
+    def __init__(
+        self,
+        spatial_dim: int = 128,
+        freq_dim: int = 64,
+        semantic_dim: int = 384,
+        hidden_dim: int = 256,
+        n_heads: int = 4,
+        dropout: float = 0.1
+    ):
         super(StreamAttention, self).__init__()
-        
-        # Query, Key, Value projections for multi-head attention
-        self.query = nn.Linear(total_dim, total_dim, bias=False)
-        self.key = nn.Linear(total_dim, total_dim, bias=False)
-        self.value = nn.Linear(total_dim, total_dim, bias=False)
-        
-        self.n_heads = n_heads
-        self.head_dim = total_dim // n_heads
-        
-        assert total_dim % n_heads == 0, f"total_dim must be divisible by n_heads"
-        
-        self.out_proj = nn.Linear(total_dim, total_dim)
-        self.layer_norm = nn.LayerNorm(total_dim)
-        self.dropout = nn.Dropout(0.1)
-        
-        self.scale = self.head_dim ** -0.5
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+
+        assert hidden_dim % n_heads == 0, \
+            f"hidden_dim ({hidden_dim}) must be divisible by n_heads ({n_heads})"
+
+        # Project each stream to common hidden_dim before attention
+        self.spatial_proj = nn.Sequential(
+            nn.Linear(spatial_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim)
+        )
+        self.freq_proj = nn.Sequential(
+            nn.Linear(freq_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim)
+        )
+        self.semantic_proj = nn.Sequential(
+            nn.Linear(semantic_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim)
+        )
+
+        # Multi-head attention over the 3 stream tokens
+        self.attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim,
+            num_heads=n_heads,
+            dropout=dropout,
+            batch_first=True
+        )
+
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self,
+        spatial_feat: torch.Tensor,
+        freq_feat: torch.Tensor,
+        semantic_feat: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
-            x: [B, total_dim]
-        
+            spatial_feat:  [B, spatial_dim]
+            freq_feat:     [B, freq_dim]
+            semantic_feat: [B, semantic_dim]
+
         Returns:
-            Attended features [B, total_dim]
+            fused:        [B, hidden_dim]  — mean-pooled attended tokens
+            attn_weights: [B, 3, 3]        — per-sample stream attention weights
         """
-        # Expand to sequence dimension for attention
-        x_seq = x.unsqueeze(1)  # [B, 1, total_dim]
-        
-        B, seq_len, total_dim = x_seq.shape
-        
-        # Multi-head attention
-        Q = self.query(x_seq).view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
-        K = self.key(x_seq).view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
-        V = self.value(x_seq).view(B, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
-        
-        # Scaled dot-product attention
-        attn_weights = torch.matmul(Q, K.transpose(-2, -1)) * self.scale
-        attn_weights = F.softmax(attn_weights, dim=-1)
-        attn_weights = self.dropout(attn_weights)
-        
-        attn_output = torch.matmul(attn_weights, V)
-        attn_output = attn_output.transpose(1, 2).contiguous().view(B, seq_len, total_dim)
-        
-        # Output projection
-        output = self.out_proj(attn_output)
-        output = self.dropout(output)
-        
-        # Residual connection + layer norm
-        output = self.layer_norm(x_seq + output).squeeze(1)  # [B, total_dim]
-        
-        return output
+        # Project each stream → [B, 1, hidden_dim]
+        s = self.spatial_proj(spatial_feat).unsqueeze(1)
+        f = self.freq_proj(freq_feat).unsqueeze(1)
+        t = self.semantic_proj(semantic_feat).unsqueeze(1)
+
+        # Stack → 3-token sequence: [B, 3, hidden_dim]
+        tokens = torch.cat([s, f, t], dim=1)
+
+        # Cross-stream attention
+        attended, attn_weights = self.attn(tokens, tokens, tokens)
+        attended = self.dropout(attended)
+
+        # Residual + LayerNorm
+        tokens = self.norm(tokens + attended)   # [B, 3, hidden_dim]
+
+        # Mean-pool over the 3 stream tokens → [B, hidden_dim]
+        fused = tokens.mean(dim=1)
+
+        return fused, attn_weights
 
 
 class MLAFFusion(nn.Module):
     """
     Multi-Level Adaptive Fusion module.
-    
+
     Architecture:
-        1. Concatenate: [spatial(128) + freq(64) + semantic(384)] = 576-dim
-        2. Attention weighting
-        3. Dense layer + Dropout
-        4. Binary classification output
-    
-    Input:  Three feature vectors [B, 128], [B, 64], [B, 384]
-    Output: Classification logit [B, 1] + fused features [B, 256]
+        1. Project each stream to hidden_dim
+        2. Cross-stream multi-head attention (3 stream tokens)
+        3. Mean-pool → [B, hidden_dim]
+        4. Classification head → [B, 1]
+
+    Input:  [B, 128], [B, 64], [B, 384]
+    Output: logit [B, 1], fused features [B, hidden_dim]
     """
-    
+
     def __init__(
         self,
         spatial_dim: int = 128,
@@ -94,43 +121,38 @@ class MLAFFusion(nn.Module):
         dropout_rate: float = 0.4
     ):
         super(MLAFFusion, self).__init__()
-        
-        self.combined_dim = spatial_dim + freq_dim + semantic_dim  # 576
-        
-        # Attention weighting
-        self.attention = StreamAttention(self.combined_dim, attention_heads)
-        
+
+        # Cross-stream attention
+        self.cross_stream_attn = StreamAttention(
+            spatial_dim=spatial_dim,
+            freq_dim=freq_dim,
+            semantic_dim=semantic_dim,
+            hidden_dim=hidden_dim,
+            n_heads=attention_heads,
+            dropout=0.1
+        )
+
         # Classification head
         self.classifier = nn.Sequential(
-            nn.Linear(self.combined_dim, hidden_dim),
-            nn.BatchNorm1d(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout_rate),
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.BatchNorm1d(hidden_dim // 2),
             nn.GELU(),
-            nn.Dropout(dropout_rate * 0.5),
+            nn.Dropout(dropout_rate),
             nn.Linear(hidden_dim // 2, 1)
         )
-        
-        # Feature projection for intermediate representation
-        self.feature_proj = nn.Sequential(
-            nn.Linear(self.combined_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim)
-        )
-        
+
         self._init_weights()
-    
+
     def _init_weights(self):
-        for m in self.modules():
+        for m in self.classifier.modules():
             if isinstance(m, nn.Linear):
                 nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
-            elif isinstance(m, (nn.BatchNorm1d, nn.LayerNorm)):
+            elif isinstance(m, nn.BatchNorm1d):
                 nn.init.ones_(m.weight)
                 nn.init.zeros_(m.bias)
-    
+
     def forward(
         self,
         spatial_feat: torch.Tensor,
@@ -139,39 +161,30 @@ class MLAFFusion(nn.Module):
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Args:
-            spatial_feat: [B, 128] from NPR Branch
-            freq_feat:    [B, 64]  from FreqBlender
-            semantic_feat: [B, 384] from FAT-Lite
-        
+            spatial_feat:  [B, 128]
+            freq_feat:     [B, 64]
+            semantic_feat: [B, 384]
+
         Returns:
-            logits: [B, 1] binary classification
-            fused_features: [B, 256] intermediate fused representation
+            logits:         [B, 1]
+            fused_features: [B, hidden_dim]
         """
-        # Verify input dimensions
-        assert spatial_feat.shape[1] == 128, f"Spatial dim must be 128, got {spatial_feat.shape[1]}"
-        assert freq_feat.shape[1] == 64, f"Freq dim must be 64, got {freq_feat.shape[1]}"
-        assert semantic_feat.shape[1] == 384, f"Semantic dim must be 384, got {semantic_feat.shape[1]}"
-        
-        # Concatenate features
-        combined = torch.cat([spatial_feat, freq_feat, semantic_feat], dim=1)  # [B, 576]
-        
-        # Attention weighting
-        attended = self.attention(combined)  # [B, 576]
-        
-        # Project to hidden dim for intermediate features
-        fused_features = self.feature_proj(attended)  # [B, 256]
-        
+        # Cross-stream attention fusion
+        fused_features, attn_weights = self.cross_stream_attn(
+            spatial_feat, freq_feat, semantic_feat
+        )  # [B, hidden_dim]
+
         # Classification
-        logits = self.classifier(attended)  # [B, 1]
-        
+        logits = self.classifier(fused_features)  # [B, 1]
+
         return logits, fused_features
 
 
 if __name__ == "__main__":
-    print("="*60)
-    print("TESTING: MLAF Fusion Module")
-    print("="*60)
-    
+    print("=" * 60)
+    print("TESTING: MLAF Fusion Module (Cross-Stream Attention)")
+    print("=" * 60)
+
     model = MLAFFusion(
         spatial_dim=128,
         freq_dim=64,
@@ -180,22 +193,21 @@ if __name__ == "__main__":
         attention_heads=4
     )
     model.eval()
-    
-    # Dummy inputs from each stream
-    spatial = torch.randn(4, 128)
-    freq = torch.randn(4, 64)
+
+    spatial  = torch.randn(4, 128)
+    freq     = torch.randn(4, 64)
     semantic = torch.randn(4, 384)
-    
+
     with torch.no_grad():
         logits, fused = model(spatial, freq, semantic)
-    
+
     print(f"Spatial input:  {spatial.shape}")
     print(f"Freq input:     {freq.shape}")
     print(f"Semantic input: {semantic.shape}")
     print(f"Logits output:  {logits.shape}")
     print(f"Fused features: {fused.shape}")
-    
-    assert logits.shape == (4, 1), f"Logits shape mismatch! Expected (4, 1), got {logits.shape}"
-    assert fused.shape == (4, 256), f"Fused shape mismatch! Expected (4, 256), got {fused.shape}"
-    
+
+    assert logits.shape == (4, 1),   f"Logits shape mismatch! {logits.shape}"
+    assert fused.shape  == (4, 256), f"Fused shape mismatch!  {fused.shape}"
+
     print("\nMLAF Fusion test PASSED!")

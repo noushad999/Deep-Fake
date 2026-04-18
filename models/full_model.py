@@ -27,6 +27,16 @@ class MultiStreamDeepfakeDetector(nn.Module):
     Total Parameters: ~25M
     """
     
+    # Valid ablation modes — which streams are ACTIVE (others zeroed)
+    ABLATION_MODES = {
+        None: (True, True, True),               # full model
+        "spatial_only":   (True,  False, False),
+        "freq_only":      (False, True,  False),
+        "semantic_only":  (False, False, True),
+        "spatial_freq":   (True,  True,  False),
+        "spatial_semantic": (True, False, True),
+    }
+
     def __init__(
         self,
         spatial_output_dim: int = 128,
@@ -34,9 +44,15 @@ class MultiStreamDeepfakeDetector(nn.Module):
         semantic_output_dim: int = 384,
         fusion_hidden_dim: int = 256,
         fusion_attention_heads: int = 4,
-        pretrained_backbones: bool = True
+        pretrained_backbones: bool = True,
+        ablation_mode: str = None
     ):
+        assert ablation_mode in self.ABLATION_MODES, \
+            f"ablation_mode must be one of {list(self.ABLATION_MODES.keys())}"
         super(MultiStreamDeepfakeDetector, self).__init__()
+        self.ablation_mode = ablation_mode
+        self._use_spatial, self._use_freq, self._use_semantic = \
+            self.ABLATION_MODES[ablation_mode]
         
         # Three parallel streams
         self.spatial_stream = NPRBranch(
@@ -93,10 +109,10 @@ class MultiStreamDeepfakeDetector(nn.Module):
             logits: [B, 1] classification logits
             features: Dict of per-stream and fused features (if return_features=True)
         """
-        # Parallel forward through each stream
-        spatial_feat = self.spatial_stream(x)      # [B, 128]
-        freq_feat = self.freq_stream(x)            # [B, 64]
-        semantic_feat = self.semantic_stream(x)    # [B, 384]
+        # Parallel forward — disabled streams are replaced with zeros
+        spatial_feat  = self.spatial_stream(x)  if self._use_spatial  else torch.zeros(x.size(0), self.fusion.cross_stream_attn.spatial_proj[0].in_features,  device=x.device)
+        freq_feat     = self.freq_stream(x)     if self._use_freq     else torch.zeros(x.size(0), self.fusion.cross_stream_attn.freq_proj[0].in_features,     device=x.device)
+        semantic_feat = self.semantic_stream(x) if self._use_semantic else torch.zeros(x.size(0), self.fusion.cross_stream_attn.semantic_proj[0].in_features, device=x.device)
         
         # Fusion and classification
         logits, fused_features = self.fusion(
