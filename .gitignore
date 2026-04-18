@@ -124,7 +124,7 @@ kaggle.json
 # AI-generated presentation/speech content
 PRESENTATION_SPEECH.md
 
-# Logs — figures and generated outputs
+# Logs — generated outputs (not tracked; regenerate locally)
 logs/tensorboard/
 logs/heatmaps/
 logs/final_eval_gradcam/
@@ -134,6 +134,9 @@ logs/evaluation_v2/
 logs/*.png
 logs/*.jpg
 logs/*.json
+
+# Assets are tracked (README figures)
+!assets/
 
 # Large model checkpoints (use Git LFS if needed)
 *.bin
