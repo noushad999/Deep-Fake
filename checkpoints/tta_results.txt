@@ -1,0 +1,4 @@
+Checkpoint: checkpoints\best_model.pth
+Plain  AUC: 97.6450%  Acc: 50.0000%
+TTA    AUC: 57.2950%  Acc: 50.0000%
+Gain   AUC: -40.3500%

@@ -60,6 +60,11 @@ class StreamAttention(nn.Module):
         self.norm = nn.LayerNorm(hidden_dim)
         self.dropout = nn.Dropout(dropout)
 
+        # Learnable stream-type embeddings (like positional encoding but for streams)
+        # Helps the model distinguish spatial vs frequency vs semantic tokens
+        self.stream_embeddings = nn.Parameter(torch.zeros(3, hidden_dim))
+        nn.init.trunc_normal_(self.stream_embeddings, std=0.02)
+
     def forward(
         self,
         spatial_feat: torch.Tensor,
@@ -84,6 +89,9 @@ class StreamAttention(nn.Module):
         # Stack → 3-token sequence: [B, 3, hidden_dim]
         tokens = torch.cat([s, f, t], dim=1)
 
+        # Add stream-type embeddings (helps attention distinguish stream types)
+        tokens = tokens + self.stream_embeddings.unsqueeze(0)
+
         # Cross-stream attention
         attended, attn_weights = self.attn(tokens, tokens, tokens)
         attended = self.dropout(attended)
@@ -91,8 +99,11 @@ class StreamAttention(nn.Module):
         # Residual + LayerNorm
         tokens = self.norm(tokens + attended)   # [B, 3, hidden_dim]
 
-        # Mean-pool over the 3 stream tokens → [B, hidden_dim]
-        fused = tokens.mean(dim=1)
+        # Weighted pool: use attention weights to weight stream contributions
+        # attn_weights: [B, 3, 3] — mean over query dim → per-stream importance [B, 3]
+        stream_importance = attn_weights.mean(dim=1)              # [B, 3]
+        stream_importance = torch.softmax(stream_importance, dim=-1).unsqueeze(-1)  # [B, 3, 1]
+        fused = (tokens * stream_importance).sum(dim=1)           # [B, hidden_dim]
 
         return fused, attn_weights
 

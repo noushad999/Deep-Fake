@@ -1,0 +1,102 @@
+# ============================================================
+# FaceForensics++ Training Config — CVPR Standard Protocol
+# ============================================================
+
+# --- Paths ---
+data:
+  ffpp_dir: "${FFPP_DIR:-/data/FaceForensics++}"
+  celebdf_dir: "${CELEBDF_DIR:-/data/Celeb-DF-v2}"
+  compression: "c23"       # c0 (raw) | c23 (HQ) | c40 (LQ)
+  manipulation_types:
+    - "Deepfakes"
+    - "Face2Face"
+    - "FaceSwap"
+    - "NeuralTextures"
+
+# --- Protocol ---
+protocol:
+  frames_per_video: 32     # frames sampled per video during train/val
+  test_all_frames: true    # use all frames during test evaluation
+  video_level_agg: "mean"  # mean | max — aggregation for video-level AUC
+  img_size: 224            # standard for most backbones
+
+# --- Model Architecture ---
+model:
+  spatial:
+    backbone:    "efficientnet_b0"
+    feature_dim: 128
+    pretrained:  true
+
+  frequency:
+    backbone:        "resnet18"
+    feature_dim:     64
+    fft_learnable:   true
+    pretrained:      true
+
+  semantic:
+    backbone:    "vit_tiny_patch16_224"
+    feature_dim: 384
+    pretrained:  true
+
+  fusion:
+    hidden_dim:       256
+    attention_heads:  4
+
+# --- Training ---
+training:
+  batch_size:           32
+  num_workers:          4
+  epochs:               30
+  lr:                   1e-4
+  weight_decay:         1e-4
+  warmup_epochs:        3
+  patience:             8
+  max_grad_norm:        1.0
+  augmentation_level:   "medium"
+
+  loss:
+    type: "bce"    # FF++ is roughly balanced (4 fake types × 1 real)
+    label_smoothing: 0.05  # slight smoothing for better calibration
+
+# --- Baselines (for comparison table) ---
+baselines:
+  - name: "XceptionDetect"
+    type: "xception"
+    lr:   1e-4
+    epochs: 30
+  - name: "CNNDetect"
+    type: "cnndetect"
+    lr:   1e-4
+    epochs: 30
+  - name: "F3Net"
+    type: "f3net"
+    lr:   1e-4
+    epochs: 30
+
+# --- Evaluation ---
+evaluation:
+  metrics:
+    - auc            # primary metric (frame-level and video-level)
+    - accuracy
+    - eer
+    - f1_score
+  per_manipulation: true    # breakdown by Deepfakes/Face2Face/FaceSwap/NT
+  cross_dataset:
+    - celebdf        # main cross-dataset benchmark
+  video_level_auc: true    # required for CelebDF comparison
+
+# --- Statistical Rigor ---
+reproducibility:
+  seeds: [3, 42, 123]      # 3 seeds minimum for CVPR
+  report_mean_std: true
+  significance_test: "paired_ttest"
+
+# --- Logging ---
+logging:
+  log_dir:        "./logs/ffpp"
+  checkpoint_dir: "./checkpoints/ffpp"
+  wandb:
+    enabled: false
+    project: "deepfake-detection-cvpr"
+
+seed: 42

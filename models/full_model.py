@@ -45,7 +45,8 @@ class MultiStreamDeepfakeDetector(nn.Module):
         fusion_hidden_dim: int = 256,
         fusion_attention_heads: int = 4,
         pretrained_backbones: bool = True,
-        ablation_mode: str = None
+        ablation_mode: str = None,
+        stream_dropout_p: float = 0.1,
     ):
         assert ablation_mode in self.ABLATION_MODES, \
             f"ablation_mode must be one of {list(self.ABLATION_MODES.keys())}"
@@ -53,6 +54,7 @@ class MultiStreamDeepfakeDetector(nn.Module):
         self.ablation_mode = ablation_mode
         self._use_spatial, self._use_freq, self._use_semantic = \
             self.ABLATION_MODES[ablation_mode]
+        self.stream_dropout_p = stream_dropout_p
         
         # Three parallel streams
         self.spatial_stream = NPRBranch(
@@ -113,6 +115,18 @@ class MultiStreamDeepfakeDetector(nn.Module):
         spatial_feat  = self.spatial_stream(x)  if self._use_spatial  else torch.zeros(x.size(0), self.fusion.cross_stream_attn.spatial_proj[0].in_features,  device=x.device)
         freq_feat     = self.freq_stream(x)     if self._use_freq     else torch.zeros(x.size(0), self.fusion.cross_stream_attn.freq_proj[0].in_features,     device=x.device)
         semantic_feat = self.semantic_stream(x) if self._use_semantic else torch.zeros(x.size(0), self.fusion.cross_stream_attn.semantic_proj[0].in_features, device=x.device)
+
+        # Stream Dropout: randomly zero entire streams during training to prevent co-adaptation.
+        # Each stream is dropped independently; at least one always survives via sequential masking.
+        if self.training and self.stream_dropout_p > 0.0 and self.ablation_mode is None:
+            streams = [spatial_feat, freq_feat, semantic_feat]
+            drop_mask = torch.rand(3, device=x.device) < self.stream_dropout_p
+            # Ensure at least one stream is active
+            if drop_mask.all():
+                drop_mask[torch.randint(3, (1,))] = False
+            if drop_mask[0]: spatial_feat  = torch.zeros_like(spatial_feat)
+            if drop_mask[1]: freq_feat     = torch.zeros_like(freq_feat)
+            if drop_mask[2]: semantic_feat = torch.zeros_like(semantic_feat)
         
         # Fusion and classification
         logits, fused_features = self.fusion(

@@ -189,6 +189,24 @@ def create_optimizer_and_scheduler(
 # Train / validate
 # -----------------------------------------------------------------------
 
+def _orthogonality_loss(*stream_feats: torch.Tensor) -> torch.Tensor:
+    """
+    Encourage streams to capture orthogonal (non-redundant) features.
+    Projects each stream to unit norm, then penalizes off-diagonal cosine
+    similarity in the batch Gram matrix across streams.
+    """
+    norms = [nn.functional.normalize(f.mean(dim=0, keepdim=True), dim=-1)
+             for f in stream_feats]
+    loss = torch.tensor(0.0, device=stream_feats[0].device)
+    n = len(norms)
+    for i in range(n):
+        for j in range(i + 1, n):
+            # Project to same space via dot product of norms (scalar cosine sim)
+            sim = (norms[i] * norms[j]).sum().abs()
+            loss = loss + sim
+    return loss / max(n * (n - 1) / 2, 1)
+
+
 def train_one_epoch(
     model: nn.Module,
     train_loader: torch.utils.data.DataLoader,
@@ -212,9 +230,15 @@ def train_one_epoch(
         labels = batch['label'].to(device, non_blocking=True)
 
         with torch.amp.autocast('cuda', enabled=use_amp):
-            logits, _ = model(images)
+            logits, features = model(images, return_features=True)
             logits    = logits.squeeze(-1)
             loss = criterion(logits, labels) / gradient_accumulation_steps
+            # Orthogonality loss: minimize cosine similarity between stream norms.
+            # Uses batch-level Gram matrix so dimension mismatch is not an issue.
+            if features is not None:
+                orth_loss = _orthogonality_loss(
+                    features['spatial'], features['frequency'], features['semantic'])
+                loss = loss + 0.01 * orth_loss / gradient_accumulation_steps
 
         if use_amp:
             scaler.scale(loss).backward()

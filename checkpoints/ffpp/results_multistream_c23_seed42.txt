@@ -1,0 +1,25 @@
+Model: multistream | Compression: c23 | Seed: 42
+Manipulation types: ['Deepfakes', 'Face2Face', 'FaceSwap', 'NeuralTextures']
+
+Frame-level:
+  acc: 100.0000
+  auc: 100.0000
+  eer: 0.0000
+  precision: 100.0000
+  recall: 100.0000
+  f1: 100.0000
+
+Video-level:
+  acc: 100.0000
+  auc: 100.0000
+  eer: 0.0000
+  precision: 100.0000
+  recall: 100.0000
+  f1: 100.0000
+
+Per-type breakdown:
+  Deepfakes: AUC=0.0000 Acc=100.00
+  Face2Face: AUC=0.0000 Acc=100.00
+  FaceSwap: AUC=0.0000 Acc=100.00
+  NeuralTextures: AUC=0.0000 Acc=100.00
+  real: AUC=0.0000 Acc=100.00
