@@ -357,8 +357,4 @@ Detailed project documents are in reports/:
 
 ---
 
-<div align="center">
 
-BSc Thesis + Ongoing CVPR-Style Extension Work
-
-</div>
