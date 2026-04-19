@@ -23,7 +23,7 @@ already been evaluated through saved artifacts.
 
 Current scope includes two tracks:
 
-1. Thesis core pipeline (custom face deepfake dataset + multi-stream model).
+1.  core pipeline (custom face deepfake dataset + multi-stream model).
 2. Extended CVPR-style pipeline (FF++, Celeb-DF, FakeCOCO/So-Fake adapters,
    cross-dataset/OOD/robustness/adversarial/efficiency tooling).
 
