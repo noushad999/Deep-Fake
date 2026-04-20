@@ -1,6 +1,6 @@
 # Diagnosing and Preventing Stream Co-Adaptation in Multi-Stream Deepfake Detectors
 
-**Md Noushad Jahan Ramim** · BSc Thesis + CVPR Extension · April 2026
+**Md Noushad Jahan Ramim**  · April 2026
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.x-ee4c2c.svg)](https://pytorch.org/)
