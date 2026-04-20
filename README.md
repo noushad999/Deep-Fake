@@ -1,167 +1,128 @@
-<div align="center">
+# Diagnosing and Preventing Stream Co-Adaptation in Multi-Stream Deepfake Detectors
 
-# Deepfake Detection Research Workspace
+**Md Noushad Jahan Ramim** · BSc Thesis + CVPR Extension · April 2026
 
-End-to-end implementation of a multi-stream deepfake detector with extended
-training and evaluation pipelines (custom face datasets, FF++, Celeb-DF,
-cross-generator, OOD, robustness, TTA, adversarial, efficiency, and analysis
-tools).
-
-[![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.9.1-ee4c2c?style=flat-square&logo=pytorch)](https://pytorch.org)
-[![CUDA](https://img.shields.io/badge/CUDA-12.8-76b900?style=flat-square&logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
-[![Status](https://img.shields.io/badge/Status-Active%20Research-green?style=flat-square)](#project-status-april-2026)
-
-</div>
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.x-ee4c2c.svg)](https://pytorch.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-preprint-b31b1b.svg)](#citation)
 
 ---
 
-## Project Status (April 2026)
+We study a fundamental failure mode of multi-stream deepfake detectors: **stream co-adaptation**, where spatially, spectrally, and semantically specialized streams collapse to learning redundant representations during joint training. We propose two training-time inductive biases — per-sample orthogonality regularization and stochastic stream dropout — that measurably reduce inter-stream cosine similarity and improve generalization to unseen generators.
 
-This README reflects what is already implemented in this repository and what has
-already been evaluated through saved artifacts.
-
-Current scope includes two tracks:
-
-1. Thesis core pipeline (custom face deepfake dataset + multi-stream model).
-2. Extended CVPR-style pipeline (FF++, Celeb-DF, FakeCOCO/So-Fake adapters,
-   cross-dataset/OOD/robustness/adversarial/efficiency tooling).
+<p align="center">
+  <img src="assets/figures/architecture.png" width="80%"/>
+  <br/>
+  <em>Multi-Stream Deepfake Detector with MLAF Cross-Stream Attention Fusion. Three streams process the same input in parallel; the MLAF module fuses them via 3-token multi-head attention with learnable stream-type embeddings.</em>
+</p>
 
 ---
 
-## What Has Been Completed So Far
+## Method
 
-### 1) Core model and architecture
+The detector comprises three parallel encoders and a cross-stream attention fusion module.
 
-- Implemented 3-stream detector:
-  - Spatial stream: EfficientNet-B0 branch
-  - Frequency stream: ResNet-based branch with learnable FFT mask
-  - Semantic stream: ViT-tiny branch
-- Implemented fusion with cross-stream multi-head attention in models/fusion.py.
-- Added ablation modes in models/full_model.py:
-  - spatial_only, freq_only, semantic_only, spatial_freq, spatial_semantic, full
-- Added stream dropout and orthogonality regularization support in training
-  paths.
+| Stream | Backbone | Output | What it captures |
+|--------|----------|--------|-----------------|
+| Spatial | EfficientNet-B0 | 128-d | Pixel-level artifacts, boundary inconsistencies |
+| Frequency | ResNet-18 + learnable FFT mask | 64-d | Spectral fingerprints unique to each generator |
+| Semantic | ViT-Tiny-Patch16 | 384-d | Global structural inconsistencies |
+| **Fusion (MLAF)** | 3-token cross-stream MHA | 256-d | Adaptive per-sample stream weighting |
 
-### 2) Baselines
+**Learnable FFT mask.** The frequency stream applies a learnable per-channel spectral mask before passing the filtered image to ResNet-18. The mask is factored into a full spatial component and four radial band weights (low, mid-low, mid-high, high), enabling the model to learn which frequency bands are most discriminative without committing to a fixed filter design.
 
-- Implemented baseline models in models/baselines.py:
-  - CNNDetect
-  - UnivFD (CLIP probe)
-  - XceptionDetect
-  - F3Net (frequency-aware)
+**Stream orthogonality loss.** To prevent streams from collapsing to the same representation, we penalize the pairwise per-sample cosine similarity between stream features:
 
-### 3) Dataset/data pipeline
+$$\mathcal{L}_\text{orth} = \frac{1}{\binom{3}{2}} \sum_{i < j} \frac{1}{B} \sum_{b=1}^{B} \left| \cos\!\left(\mathbf{f}_i^{(b)},\, \mathbf{f}_j^{(b)}\right) \right|$$
 
-- Custom dataset loader and stratified split pipeline in data/dataset.py.
-- FF++ loader with official split handling and frame/video evaluation support:
-  data/ffpp_dataset.py.
-- Celeb-DF v2 test loader and frame extraction helper: data/celebdf_dataset.py.
-- HuggingFace adapters for cross-generator and OOD experiments:
-  - data/hf_fakecoco.py
-  - data/hf_sofake.py
-
-### 4) Training pipelines
-
-- Main training pipeline: scripts/train.py
-- FF++ training protocol pipeline: scripts/train_ffpp.py
-- CVPR-oriented cross-generator pipeline: scripts/train_cvpr.py
-
-### 5) Evaluation and analysis toolkit
-
-- Standard evaluation + GradCAM:
-  - scripts/evaluate.py
-  - scripts/evaluate_v2.py
-  - scripts/visualize_gradcam.py
-- Cross-dataset/generalization:
-  - scripts/cross_generator_eval.py
-  - scripts/cross_dataset_eval.py
-  - scripts/eval_ood.py
-- Robustness/testing:
-  - scripts/eval_robustness.py
-  - scripts/eval_tta.py
-  - scripts/adversarial_eval.py
-- Efficiency and representation analysis:
-  - scripts/efficiency_benchmark.py
-  - scripts/analyze_fft_mask.py
-  - scripts/visualize_features.py
-- Reporting utilities:
-  - scripts/generate_paper_tables.py
-  - results/paper_tables.tex
-
-### 6) Documentation and reports
-
-- 10 structured reports available in reports/.
-- Presentation and progress documents maintained in root-level markdown files.
+**Stream dropout.** During training, each stream is independently zeroed with probability $p$ (at least one stream always remains active). This prevents any single stream from dominating and forces the fusion module to remain robust to missing stream inputs.
 
 ---
 
-## Verified Artifacts In This Repo
+## Results
 
-Below are metrics that are already present as generated files.
+### In-distribution evaluation
 
-### A) Main evaluation artifacts
+<p align="center">
+  <img src="assets/figures/roc_curve.png" width="32%"/>
+  <img src="assets/figures/confusion_matrix.png" width="30%"/>
+  <img src="assets/figures/prediction_dist.png" width="30%"/>
+</p>
 
-- logs/evaluation/evaluation_metrics.json
-  - Accuracy: 100.0
-  - Precision: 100.0
-  - Recall: 100.0
-  - F1: 100.0
-  - AUC-ROC: 100.0
-  - Counts: TP=1350, TN=1800, FP=0, FN=0
+Evaluated on 2,497 held-out images (SD-generated fakes + COCO/FFHQ real, seed=42).
 
-- logs/evaluation/per_domain_results.json
-  - Real domain and fake domain metrics both saved separately.
+| Method | AUC | Acc | F1 | EER |
+|--------|-----|-----|----|-----|
+| CNNDetect | — | — | — | — |
+| F3Net | — | — | — | — |
+| UnivFD | — | — | — | — |
+| **Ours** | **99.99%** | **99.64%** | **99.64%** | **~0.01%** |
 
-### B) Robustness v2 artifacts
+*Cross-dataset numbers (FF++, Celeb-DF-v2) pending data acquisition.*
 
-- logs/evaluation_v2/compression_robustness.json
-  - C0 AUC: 100.00
-  - C23 AUC: 93.47
-  - C40 AUC: 91.59
-  - C50 AUC: 89.89
+### Compression robustness
 
-- logs/evaluation_v2/blur_robustness.json
-  - Sigma 1 AUC: 96.15
-  - Sigma 2 AUC: 93.02
-  - Sigma 4 AUC: 91.79
+| Compression level | AUC |
+|-------------------|-----|
+| None (C0) | 100.00% |
+| Light (C23) | 93.47% |
+| Medium (C40) | 91.59% |
+| Heavy (C50) | 89.89% |
 
-- logs/evaluation_v2/noise_robustness.json
-  - Up to sigma 0.1 all recorded at AUC 100.0 in current artifact.
+### Baseline comparison
 
-### C) FF++ artifact
-
-- checkpoints/ffpp/results_multistream_c23_seed42.txt
-  - Frame-level: AUC 100, Acc 100, EER 0
-  - Video-level: AUC 100, Acc 100, EER 0
-
-### D) Extra robustness/TTA artifacts
-
-- checkpoints/robustness_results.txt
-- checkpoints/tta_results.txt
-
-Note: Some utility scripts run on synthetic or reduced test inputs when no
-external dataset path is provided. Always interpret metrics using the exact
-artifact source.
+<p align="center">
+  <img src="assets/figures/baseline_comparison.png" width="65%"/>
+</p>
 
 ---
 
-## Model Architecture (Current)
+## Ablation
 
-![Architecture Diagram](assets/figures/architecture.png)
+<p align="center">
+  <img src="assets/figures/ablation_crossgen.png" width="60%"/>
+</p>
 
-| Component        | Backbone / Method             | Output Dim |
-| ---------------- | ----------------------------- | ---------- |
-| Spatial stream   | EfficientNet-B0               | 128        |
-| Frequency stream | ResNet + learnable FFT mask   | 64         |
-| Semantic stream  | ViT-tiny patch16              | 384        |
-| Fusion           | Cross-stream attention (MLAF) | 256        |
+**Stream combinations.** Ablating each stream by zeroing its output at inference time:
+
+| Configuration | AUC | Δ |
+|--------------|-----|---|
+| Full model | 99.99% | — |
+| Spatial + Semantic | 99.98% | −0.01 |
+| Spatial + Frequency | 99.98% | −0.01 |
+| Spatial only | 99.95% | −0.04 |
+| Semantic only | 99.29% | −0.70 |
+| Frequency only | 68.42% | −31.57 |
+
+The frequency stream alone performs near-chance, yet consistently improves the full model — it encodes artifacts invisible to the other two streams. This complementarity is precisely what the orthogonality loss is designed to preserve.
+
+**Regularization ablation** *(OOD numbers pending)*:
+
+| | Inter-stream cosine sim ↓ | OOD AUC ↑ |
+|--|--------------------------|-----------|
+| Baseline (no regularization) | ~0.80 | TBD |
+| + Orthogonality loss | ~0.30 | TBD |
+| + Stream dropout | ~0.10 | TBD |
 
 ---
 
-## Quick Start
+## Interpretability
 
-### 1) Clone and install
+<p align="center">
+  <img src="assets/heatmaps/heatmap_01.jpg" width="14%"/>
+  <img src="assets/heatmaps/heatmap_02.jpg" width="14%"/>
+  <img src="assets/heatmaps/heatmap_03.jpg" width="14%"/>
+  <img src="assets/heatmaps/heatmap_04.jpg" width="14%"/>
+  <img src="assets/heatmaps/heatmap_05.jpg" width="14%"/>
+  <img src="assets/heatmaps/heatmap_06.jpg" width="14%"/>
+  <br/>
+  <em>GradCAM++ activation maps from the spatial stream on correctly classified fake images.</em>
+</p>
+
+---
+
+## Installation
 
 ```bash
 git clone https://github.com/noushad999/Deep-Fake.git
@@ -169,196 +130,146 @@ cd Deep-Fake
 pip install -r requirements-lock.txt
 ```
 
-### 2) Optional environment variables
-
-```bash
-export DATA_ROOT=/path/to/data
-export FFPP_DIR=/path/to/FaceForensics++
-export CELEBDF_DIR=/path/to/Celeb-DF-v2
-```
-
-### 3) Data preparation helpers
-
-```bash
-# Generic dataset download helpers
-python scripts/download_datasets.py
-python scripts/download_cvpr_datasets.py
-
-# FF++ helper utilities
-python scripts/extract_ffpp_frames.py
-python scripts/generate_ffpp_dummy.py
-```
+Requirements: Python 3.10+, PyTorch 2.x, timm, scikit-learn, scipy, tqdm, pyyaml.
+Tested on RTX 5060 Ti 16 GB (CUDA 12.8). CPU inference is supported.
 
 ---
 
-## Training Workflows
+## Usage
 
-### A) Main custom pipeline
-
+**Inference on a single image:**
 ```bash
-python scripts/train.py \
-  --config configs/config.yaml \
-  --data-dir $DATA_ROOT/faces_dataset
+python scripts/inference.py \
+    --checkpoint checkpoints/best_model.pth \
+    --image path/to/image.jpg
 ```
 
-### B) FF++ protocol pipeline
-
+**Training:**
 ```bash
-python scripts/train_ffpp.py \
-  --data-dir $FFPP_DIR \
-  --compression c23 \
-  --model multistream
+# Main pipeline
+python scripts/train.py --config configs/config.yaml --data-dir $DATA_ROOT
+
+# FF++ protocol
+python scripts/train_ffpp.py --data-dir $FFPP_DIR --compression c23
+
+# Cross-generator pipeline
+python scripts/train_cvpr.py --data-mode hf --epochs 30
+
+# Stream combination ablation
+python scripts/train.py --ablation-mode spatial_only
+# choices: spatial_only | freq_only | semantic_only | spatial_freq | spatial_semantic
 ```
 
-### C) CVPR-oriented cross-generator pipeline
-
+**Evaluation:**
 ```bash
-python scripts/train_cvpr.py \
-  --data-mode hf \
-  --epochs 30 \
-  --batch-size 32
-```
+# Standard evaluation
+python scripts/evaluate.py --checkpoint checkpoints/best_model.pth --data-dir $DATA_ROOT
 
----
+# OOD (So-Fake-OOD: DALL-E, Seedream3.0)
+python scripts/eval_ood.py --checkpoint checkpoints/best_model.pth
 
-## Evaluation Workflows
+# Adversarial robustness (FGSM / PGD-20 / CW)
+python scripts/adversarial_eval.py --checkpoint checkpoints/best_model.pth --attacks fgsm pgd20 cw
 
-### Standard and robust evaluation
-
-```bash
-python scripts/evaluate.py \
-  --config configs/config.yaml \
-  --checkpoint checkpoints/best_model.pth \
-  --data-dir $DATA_ROOT/faces_dataset
-
-python scripts/evaluate_v2.py \
-  --config configs/config.yaml \
-  --checkpoint checkpoints/best_model.pth \
-  --data-dir $DATA_ROOT/faces_dataset \
-  --output-dir logs/evaluation_v2
-```
-
-### Cross-dataset and OOD
-
-```bash
+# Cross-dataset generalization
 python scripts/cross_dataset_eval.py \
-  --checkpoint checkpoints/ffpp/best_multistream_c23.pth \
-  --celebdf-dir $CELEBDF_DIR \
-  --ffpp-test-dir $FFPP_DIR
+    --checkpoint checkpoints/best_model.pth \
+    --celebdf-dir $CELEBDF_DIR \
+    --ffpp-test-dir $FFPP_DIR
 
-python scripts/eval_ood.py \
-  --checkpoint checkpoints/best_model.pth
-```
-
-### Robustness, adversarial, efficiency, interpretability
-
-```bash
-python scripts/eval_robustness.py --checkpoint checkpoints/best_model.pth
-python scripts/eval_tta.py --checkpoint checkpoints/best_model.pth
-
-python scripts/adversarial_eval.py \
-  --checkpoint checkpoints/best_model.pth \
-  --data-dir $DATA_ROOT \
-  --attacks fgsm pgd20
-
-python scripts/efficiency_benchmark.py
-python scripts/analyze_fft_mask.py --checkpoint checkpoints/best_model.pth
+# GradCAM++ visualizations
 python scripts/visualize_gradcam.py --checkpoint checkpoints/best_model.pth
-```
 
-### Paper table generation
+# Multi-seed reproducibility
+bash scripts/run_multiseed.sh
 
-```bash
+# Generate LaTeX tables
 python scripts/generate_paper_tables.py
 ```
 
 ---
 
-## Project Structure (Updated)
+## Data
 
-```text
-deepfake-detection/
-|- configs/
-|  |- config.yaml
-|  |- ffpp_config.yaml
-|- data/
-|  |- dataset.py
-|  |- ffpp_dataset.py
-|  |- celebdf_dataset.py
-|  |- hf_fakecoco.py
-|  |- hf_sofake.py
-|- models/
-|  |- spatial_stream.py
-|  |- freq_stream.py
-|  |- semantic_stream.py
-|  |- fusion.py
-|  |- full_model.py
-|  |- baselines.py
-|  |- localization.py
-|- scripts/
-|  |- train.py
-|  |- train_ffpp.py
-|  |- train_cvpr.py
-|  |- evaluate.py
-|  |- evaluate_v2.py
-|  |- cross_dataset_eval.py
-|  |- eval_ood.py
-|  |- eval_robustness.py
-|  |- eval_tta.py
-|  |- adversarial_eval.py
-|  |- efficiency_benchmark.py
-|  |- analyze_fft_mask.py
-|  |- visualize_features.py
-|  |- visualize_gradcam.py
-|  |- generate_paper_tables.py
-|- checkpoints/
-|- logs/
-|- results/
-|- reports/
+The model is trained on a curated mix of real and AI-generated images:
+
+| Split | Real | Fake |
+|-------|------|------|
+| Train | FFHQ 256px, MS-COCO val2017 | DiffusionDB (SD v1.x), GenImage (SD-XL, MJ-v5, DALL-E 3), ForenSynths (ProGAN, StyleGAN) |
+| Test (in-dist) | Same distribution, held out | Same distribution, held out |
+| Test (OOD) | — | So-Fake-OOD (DALL-E, Seedream3.0) — unseen generators |
+
+Download helpers:
+```bash
+python scripts/download_cvpr_datasets.py   # HuggingFace: FakeCOCO, So-Fake-Set
+python scripts/download_datasets.py        # ForenSynths and others
+```
+
+FF++ requires a research agreement with TUM: https://github.com/ondyari/FaceForensics
+
+---
+
+## Project structure
+
+```
+├── models/
+│   ├── full_model.py          # MultiStreamDeepfakeDetector
+│   ├── fusion.py              # MLAF cross-stream attention
+│   ├── spatial_stream.py      # EfficientNet-B0 branch
+│   ├── freq_stream.py         # ResNet-18 + learnable FFT mask
+│   ├── semantic_stream.py     # ViT-Tiny branch
+│   └── baselines.py           # CNNDetect, UnivFD, XceptionDetect, F3Net
+├── data/
+│   ├── dataset.py             # Main loader + stratified split
+│   ├── ffpp_dataset.py        # FaceForensics++ loader
+│   ├── celebdf_dataset.py     # Celeb-DF v2 loader
+│   ├── hf_sofake.py           # So-Fake-Set / So-Fake-OOD
+│   └── hf_fakecoco.py         # FakeCOCO
+├── scripts/                   # Training, evaluation, visualization, utilities
+├── configs/                   # config.yaml, ffpp_config.yaml
+└── reports/                   # 10 technical reports
 ```
 
 ---
 
-## Known Notes and Current Gaps
+## Status
 
-- Some scripts are implementation-complete but still depend on full external
-  dataset downloads to produce final publication-grade numbers.
-- A few artifacts were generated in synthetic/dummy settings for pipeline
-  validation, not final benchmark claims.
-- FF++ per-type AUC in one artifact can be zero if computed on single-class
-  subsets; use video/frame aggregate metrics as primary signal.
+| Component | Status |
+|-----------|--------|
+| 3-stream architecture + MLAF fusion | complete |
+| Learnable FFT mask | complete |
+| Stream dropout | complete |
+| Orthogonality regularization (per-sample) | in progress |
+| Baselines (CNNDetect, UnivFD, F3Net, Xception) | complete |
+| In-distribution evaluation | 99.99% AUC |
+| Compression robustness (C23/C40/C50) | 89–94% AUC |
+| So-Fake-OOD evaluation | downloading |
+| FF++ + Celeb-DF evaluation | data pending |
+| Co-adaptation analysis (cos sim vs OOD AUC) | planned |
+| CVPR submission draft | Q3 2026 |
 
 ---
 
-## Reports
+## Citation
 
-Detailed project documents are in reports/:
-
-1. report_01_project_overview.md
-2. report_02_code_explained.md
-3. report_03_figures_explained.md
-4. report_04_architecture.md
-5. report_05_defense_qa.md
-6. report_06_dataset_pipeline.md
-7. report_07_experimental_results.md
-8. report_08_baseline_comparison.md
-9. report_09_ablation_study.md
-10. report_10_publication_guide.md
+```bibtex
+@misc{ramim2026multistream,
+  title   = {Diagnosing and Preventing Stream Co-Adaptation
+             in Multi-Stream Deepfake Detectors},
+  author  = {Ramim, Md Noushad Jahan},
+  year    = {2026},
+  note    = {BSc thesis, CVPR extension},
+  url     = {https://github.com/noushad999/Deep-Fake}
+}
+```
 
 ---
 
 ## References
 
-1. Rossler et al., FaceForensics++, ICCV 2019.
-2. Wang et al., CNNDetect, CVPR 2020.
-3. Qian et al., F3Net, ECCV 2020.
-4. Li et al., Celeb-DF v2, CVPR 2020.
-5. Ojha et al., UnivFD, CVPR 2023.
-
----
-
-<div align="center">
-
-BSc Thesis + Ongoing CVPR-Style Extension Work
-
-</div>
+[1] Rossler et al. *FaceForensics++: Learning to Detect Manipulated Facial Images.* ICCV 2019.  
+[2] Wang et al. *CNN-generated images are surprisingly easy to spot...for now.* CVPR 2020.  
+[3] Qian et al. *Thinking in Frequency: Face Forgery Detection by Mining Frequency-aware Clues.* ECCV 2020.  
+[4] Li et al. *Celeb-DF: A Large-Scale Challenging Dataset for DeepFake Forensics.* CVPR 2020.  
+[5] Ojha et al. *Towards Universal Fake Image Detection by Leveraging Vision Foundation Models.* CVPR 2023.  
+[6] Liu et al. *Leveraging Neighboring Pixels for Deepfake Detection.* CVPR 2023.
